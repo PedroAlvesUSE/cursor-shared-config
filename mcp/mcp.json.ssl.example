@@ -13,7 +13,10 @@
         "ALLOW_UPDATE_OPERATION": "false",
         "ALLOW_DELETE_OPERATION": "false",
         "ALLOW_DDL_OPERATION": "false",
-        "MYSQL_SSL": "false",
+        "MYSQL_SSL": "true",
+        "MYSQL_SSL_CA": "/ABS/PATH/TO/ssl_certs/server-ca.pem",
+        "MYSQL_SSL_CERT": "/ABS/PATH/TO/ssl_certs/client-cert.pem",
+        "MYSQL_SSL_KEY": "/ABS/PATH/TO/ssl_certs/client-key.pem",
         "MYSQL_POOL_SIZE": "10",
         "MYSQL_QUERY_TIMEOUT": "30000",
         "MYSQL_ENABLE_LOGGING": "false"
