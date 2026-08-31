@@ -1,8 +1,8 @@
-# ia — configs Cursor para o time
+# cursor-team-config — configs Cursor para o time
 
 Repositório com **MCPs**, **rules**, **skills**, **hooks** e **user rules** para padronizar o Cursor no time.
 
-Repo no GitHub: https://github.com/PedroAlvesUSE/ia
+Repo no GitHub: https://github.com/PedroAlvesUSE/cursor-team-config
 
 ## Conteúdo
 
@@ -21,8 +21,8 @@ Repo no GitHub: https://github.com/PedroAlvesUSE/ia
 ## Instalação rápida
 
 ```bash
-git clone https://github.com/PedroAlvesUSE/ia.git
-cd ia
+git clone https://github.com/PedroAlvesUSE/cursor-team-config.git
+cd cursor-team-config
 ./scripts/install.sh
 ```
 

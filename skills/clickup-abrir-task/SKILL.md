@@ -20,7 +20,7 @@ Sempre que o usuário pedir para criar/abrir tarefa no ClickUp (ou “Click”).
 | Pasta atual | `2026` (`901315059788`) |
 | Lista padrão | Solicitações (`901322499540`) |
 | Status inicial | `backlog` (omitir no create = default da lista) |
-| Responsável padrão (Pedro Henrique) | ID `194478583` · `pedro.henrique@useuniformesp.com.br` |
+| Responsável padrão (Pedro Henrique) | ID `YOUR_CLICKUP_USER_ID` · `you@example.com` |
 
 Listas históricas (só se o usuário pedir explicitamente): Q2 2025 `901308259066`, Q2 2024 `901303107178`.
 
@@ -31,10 +31,10 @@ Listas históricas (só se o usuário pedir explicitamente): Q2 2025 `9013082590
 3. Montar `markdown_description` com o molde abaixo (adaptar seções ao pedido).
 4. Criar com MCP `clickup_create_task`:
    - `list_id`, `name`, `markdown_description`
-   - `assignees`: **sempre** `["194478583"]` quando for “pra mim” / Pedro Henrique (não confiar só em `"me"` no create — pode falhar)
+   - `assignees`: **sempre** `["YOUR_CLICKUP_USER_ID"]` quando for “pra mim” / Pedro Henrique (não confiar só em `"me"` no create — pode falhar)
    - `priority` só se o usuário pedir (`urgent` \| `high` \| `normal` \| `low`)
 5. **Verificar** com `clickup_get_task`: `assignees` não pode ficar `[]`.
-6. Se vazio: `clickup_update_task` com `assignees: ["194478583"]` (ou ID resolvido) e verificar de novo.
+6. Se vazio: `clickup_update_task` com `assignees: ["YOUR_CLICKUP_USER_ID"]` (ou ID resolvido) e verificar de novo.
 7. Responder com link `https://app.clickup.com/t/<task_id>`, lista e responsável.
 
 ### Resolver outros assignees
@@ -111,7 +111,7 @@ Pedido: “cria tarefa pra avaliar coletar imposto sobre pedidos do bling, atrib
 
 - Lista: `901322499540`
 - Nome: `Avaliar coleta de imposto sobre pedidos via Bling`
-- Assignees: `["194478583"]`
+- Assignees: `["YOUR_CLICKUP_USER_ID"]`
 - Descrição: molde Objetivo/Contexto/Escopo/Entregável preenchido
 - Pós-create: `get_task` → se `assignees` vazio → `update_task` → confirmar
 
