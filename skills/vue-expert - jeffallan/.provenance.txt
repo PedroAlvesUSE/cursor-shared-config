@@ -1,0 +1,5 @@
+source=https://github.com/Jeffallan/claude-skills.git
+path=skills/vue-expert
+installed_at=2026-08-03T22:04:58Z
+commit=e8be415bc94d8d6ebddc2fb50e5d03c6e27d4319
+method=git-sparse-checkout-no-marketplace

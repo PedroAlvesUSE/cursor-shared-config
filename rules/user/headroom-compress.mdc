@@ -1,0 +1,30 @@
+---
+description: Sempre usar Headroom MCP para comprimir contexto e reduzir prompt
+alwaysApply: true
+---
+
+# Headroom — reduzir prompt
+
+Sempre usar o MCP `user-headroom` para economizar contexto. Não pedir confirmação.
+
+## Quando comprimir (`headroom_compress`)
+
+Chamar em qualquer conteúdo grande **antes** de raciocinar ou repetir no contexto:
+
+- Saídas longas de tools (shell, grep, builds, logs, testes)
+- Conteúdo de arquivos grandes ou vários arquivos lidos de uma vez
+- Resultados de busca, diffs, dumps JSON/HTML
+- Qualquer bloco estimado em **> ~500 tokens** ou que não precise ser citado na íntegra
+
+## Como usar
+
+1. `headroom_compress` com o conteúdo bruto
+2. Manter só o resumo comprimido + o `hash` retornado
+3. Usar `headroom_retrieve` com o `hash` só quando precisar do detalhe original
+4. Opcional: `headroom_stats` ao fim de tarefas longas, se útil ao usuário
+
+## Não fazer
+
+- Não colar de volta no chat o conteúdo completo já comprimido
+- Não ignorar o Headroom quando o MCP estiver `ready`
+- Se o servidor estiver indisponível/`needsAuth`, seguir sem bloquear a tarefa

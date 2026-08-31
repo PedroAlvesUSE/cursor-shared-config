@@ -1,0 +1,1 @@
+Never use em dashes (—) in narrative prose; instead, opt for commas or periods, or rephrase using strong actions—except within dialogue, where em dashes remain appropriate for indicating interruptions and abrupt shifts in speech.

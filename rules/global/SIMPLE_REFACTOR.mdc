@@ -1,0 +1,248 @@
+# MDC --- Structural Refactoring Only (C# Projects)
+
+## Purpose
+
+This document defines strict rules for **structural refactoring only**
+in C# projects.
+
+The allowed scope is limited to:
+
+* Adjusting namespaces
+* Renaming classes and interfaces
+* Removing redundant project-name prefixes
+* Renaming files to match class names
+* Fixing `using` statements
+* Updating dependency injection registrations if required for
+  compilation
+
+⚠ No business logic changes are allowed.\
+⚠ No architectural changes are allowed.\
+⚠ No behavioral modifications are allowed.
+
+The goal is to ensure naming consistency while preserving full
+functionality.
+
+***
+
+## Allowed Changes
+
+You MAY:
+
+* Update namespaces to match folder structure
+* Rename classes and interfaces
+* Rename files to match public class names
+* Remove project-name prefixes from types
+* Fix `using` statements after renaming
+* Update constructor injections if needed
+* Update DI registrations to match renamed types
+* Ensure the project compiles successfully
+
+***
+
+## Forbidden Changes
+
+You MUST NOT:
+
+* Modify business logic
+* Change method bodies
+* Alter return types
+* Change validation rules
+* Modify database access behavior
+* Introduce new patterns
+* Restructure architecture
+* Optimize code
+* Improve performance
+* Change public API contracts
+* Move files between architectural layers
+* Refactor for style improvements beyond naming
+
+If the project compiled before, it must compile after --- with only
+naming adjustments.
+
+***
+
+## Main Rule --- Remove Project Name Prefix
+
+If the project is named:
+
+```
+{PlatformName}Api.csproj
+```
+
+Then class and interface names must NOT include the project name.
+
+### Example
+
+Before                     After
+
+***
+
+IPlatformNameCustomer           ICustomer
+PlatformNameCustomerService     CustomerService
+PlatformNameOrderDto            OrderDto
+PlatformNameProductRepository   ProductRepository
+
+The project context already implies ownership.
+
+***
+
+## Namespace Rules
+
+Namespaces must:
+
+* Match the project name
+* Reflect the folder hierarchy
+* Use file-scoped namespace syntax when possible
+
+### Example
+
+File location:
+
+```
+/Services/CustomerService.cs
+```
+
+Correct namespace:
+
+```
+namespace BlingApi.Services;
+```
+
+If moved to:
+
+```
+/Application/Services/CustomerService.cs
+```
+
+Correct namespace:
+
+```
+namespace BlingApi.BlingApi.Services;
+```
+
+***
+
+## File Naming Rules
+
+* One public class per file
+* File name must match the public class name exactly
+* Interfaces must follow the same rule
+
+Correct examples:
+
+```
+ICustomer.cs
+CustomerService.cs
+OrderDto.cs
+```
+
+***
+
+## Interface Naming Rules
+
+Interfaces must:
+
+* Start with I
+* Not include the project name
+* Clearly describe responsibility
+
+Valid:
+
+```
+ICustomerService
+IOrderRepository
+```
+
+Invalid:
+
+```
+IShopifyCustomerService
+```
+
+***
+
+## Class Naming Rules
+
+Classes must:
+
+* Use PascalCase
+* Not include the project name prefix
+* Clearly reflect their responsibility
+
+Valid:
+
+```
+CustomerService
+OrderRepository
+ProductClient
+```
+
+Invalid:
+
+```
+ShopifyCustomerService
+```
+
+***
+
+## DTO Naming Rules
+
+DTOs must:
+
+* End with Dto, Request, or Response
+* Not include the project name
+
+Valid:
+
+```
+CustomerDto
+CreateOrderRequest
+OrderResponse
+```
+
+Invalid:
+
+```
+ShopifyCustomerDto
+```
+
+***
+
+## Dependency Injection Update Example
+
+Before:
+
+```
+services.AddScoped<IShopifyCustomer, ShopifyCustomerService>();
+```
+
+After:
+
+```
+services.AddScoped<ICustomer, CustomerService>();
+```
+
+***
+
+## Final Verification Checklist
+
+After refactoring:
+
+* All namespaces are correct
+* All file names match class names
+* All project-name prefixes are removed
+* All `using` statements are valid
+* DI registrations are updated
+* The project compiles successfully
+* No business logic was modified
+
+***
+
+## Executive Summary
+
+This refactoring is:
+
+**Structural and nominal only --- not behavioral.**
+
+The purpose is to standardize naming and remove redundant project
+prefixes while maintaining full operational integrity.

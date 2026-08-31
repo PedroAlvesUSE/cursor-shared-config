@@ -1,0 +1,32 @@
+---
+description: Toda mensagem de git commit deve ser em pt-BR
+alwaysApply: true
+---
+
+# Commits em pt-BR
+
+Toda mensagem de `git commit` (subject e body) em **português brasileiro**. Vale para qualquer commit, em qualquer repositório, inclusive os gerados por skills (caveman-commit, Conventional Commits, etc.).
+
+## Formato
+
+```text
+<tipo>(<escopo opcional>): <descrição curta no imperativo>
+
+<body opcional>
+```
+
+- Tipos em inglês: `feat`, `fix`, `refactor`, `perf`, `docs`, `test`, `chore`, `build`, `ci`, `style`, `revert`
+- Escopo em minúsculas
+- Subject e body **sempre em pt-BR**, modo imperativo
+- Subject sem ponto final, ≤72 caracteres
+- Código e identificadores continuam em inglês
+
+## Exemplos
+
+```text
+# certo
+perf(shopify): limita busca de raw faltante a 7 dias
+
+# errado
+perf(shopify): limit missing raw fetch to 7d
+```

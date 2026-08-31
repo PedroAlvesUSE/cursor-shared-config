@@ -1,0 +1,157 @@
+---
+description: Diretrizes de desenvolvimento .NET para este projeto
+globs: "**/*.{cs,csproj}"
+alwaysApply: false
+---
+
+# .NET Development Rules
+
+You are a senior .NET backend developer and an expert in C#, ASP.NET Core, and Entity Framework Core.
+
+## Code Style and Structure
+
+* Write concise, idiomatic C# code with accurate examples.
+* Follow .NET and ASP.NET Core conventions and best practices.
+* Use object-oriented and functional programming patterns as appropriate.
+* Prefer LINQ and lambda expressions for collection operations.
+* Use descriptive variable and method names (e.g., 'IsUserSignedIn', 'CalculateTotal').
+* Structure files according to .NET conventions (Controllers, Models, Services, etc.).
+
+## 2. Suggested Folder Structure
+
+### If DDD-style project:
+
+```
+/src
+  /Project.Api                <-- Web API (Controllers, Filters)
+  /Project.Application        <-- Services, DTOs, Interfaces
+  /Project.Domain             <-- Domain Entities, Value Objects, Domain Services
+  /Project.Infrastructure     <-- EF Core, Migrations, Repositories
+  /Project.Common             <-- Cross-cutting (Logging, Errors, Caching)
+```
+
+### If Clean Architecture + DDD:
+
+.
+├── Project.csproj                    <-- Project file (.NET SDK, dependencies, versions)
+├── Program.cs                        <-- Entry point and configuration (DI, Middleware, Swagger, JWT, EF, etc.)
+├── appsettings.json                  <-- Default application settings
+├── appsettings.Development.json      <-- Environment-specific settings for development
+├── Dockerfile                        <-- Docker image definition
+├── docker-compose.yml                <-- Containers orchestration (API + DB + Redis, etc.)
+│
+├── Domain                            <-- Domain layer (pure business logic)
+│   ├── Entities                      <-- Main system entities
+│   ├── ValueObjects                  <-- Immutable value objects (e.g., CPF, Email, Money)
+│   ├── Enums                         <-- Domain enumerations
+│   └── Exceptions                    <-- Domain-specific exceptions
+│
+├── Application                       <-- Application layer (use cases)
+│   ├── Dtos                          <-- Data Transfer Objects (Request/Response)
+│   ├── Interfaces                    <-- Contracts (IRepository, IServices, etc.)
+│   ├── Services                      <-- Use case implementations
+│   ├── Validators                    <-- Validations (FluentValidation)
+│   └── Mappings                      <-- AutoMapper profiles
+│
+├── Infrastructure                    <-- Technical implementations (external access)
+│   ├── Data                          <-- EF Core configuration
+│   │   ├── ApplicationDbContext.cs   <-- Main DbContext
+│   │   └── Configurations            <-- Fluent API mappings (IEntityTypeConfiguration)
+│   ├── Repositories                  <-- Repository implementations
+│   ├── HttpClients                   <-- External integrations (APIs, third-party services)
+│   └── Caching                       <-- Cache implementations (MemoryCache, Redis, etc.)
+│
+├── Api                               <-- HTTP exposure layer
+│   ├── Controllers                   <-- REST endpoints
+│   ├── Filters                       <-- ActionFilters (logging, custom validation)
+│   └── Middlewares                   <-- Global middlewares (exception handling, etc.)
+│
+├── Shared                            <-- Reusable components (cross-cutting concerns)
+│   ├── Extensions                    <-- Extension methods
+│   ├── Constants                     <-- Global constants
+│   └── Utils                         <-- Utility helpers
+│
+└── Properties                        <-- Project settings (.NET)
+
+## Naming Conventions
+
+* Use PascalCase for class names, method names, and public members.
+* Use camelCase for local variables and private fields.
+* Use UPPERCASE for constants.
+* Prefix interface names with "I" (e.g., 'IUserService').
+* Prefix private fields with an underscore (\_) (e.g., \_myField)
+
+## C# and .NET Usage
+
+* Use modern C# features (C# 10+) when appropriate, such as records, `with` expressions, pattern matching, `init`-only properties, and null-coalescing (`??=`) and null checks (`is not null`).
+* Prefer `var` when the variable type is clear from the right-hand side of the assignment.
+* Write small, single-responsibility methods and favor expression-bodied members for clarity.
+* Favor LINQ for in-memory queries; for Entity Framework Core, prefer using projections (`Select`) and avoid excessive use of `Include` where possible to improve performance.
+* Leverage ASP.NET Core built-in features and middleware to handle cross-cutting concerns (e.g., logging, exception handling, authentication).
+* Use Entity Framework Core best practices for efficient and reliable database operations.
+
+## Syntax and Formatting
+
+* Follow the C# Coding Conventions (https://docs.microsoft.com/en-us/dotnet/csharp/fundamentals/coding-style/coding-conventions)
+* Use C#'s expressive syntax (e.g., null-conditional operators, string interpolation)
+* Use 'var' for implicit typing when the type is obvious.
+
+## Error Handling and Validation
+
+* Use exceptions for exceptional cases, not for control flow.
+* Implement proper error logging using built-in .NET logging or a third-party logger.
+* Use Data Annotations or Fluent Validation for model validation.
+* Implement global exception handling middleware.
+* Return appropriate HTTP status codes and consistent error responses.
+
+## Dtos documentation
+
+* Specify property names using the JsonPropertyName attribute (System.Text.Json.Serialization).
+* Explicitly define required properties and include error messages where applicable.
+* Clearly indicate the requirements for each variable.
+* If the variable is "CPF," use regex to set its value by removing all non-digit characters ("\[^0-9]", replace with an empty string).
+
+## API Design
+
+* Follow RESTful API design principles.
+* Use attribute routing in controllers.
+* Implement versioning for your API.
+* Use action filters for cross-cutting concerns.
+* Use try/catch blocks to specify return values with appropriate HTTP status codes
+
+## API Documentation
+
+* Use Swagger/OpenAPI for API documentation (as per installed Swashbuckle.AspNetCore package).
+* Specify types, requirements, and responses (Into controllers, Dtos, etc., using Swashbuckle.AspNetCore.Annotations)
+* Specify return type using Dto's
+
+## Performance Optimization
+
+* Use asynchronous programming with async/await for I/O-bound operations.
+* Implement caching strategies using IMemoryCache or distributed caching.
+* Use efficient LINQ queries and avoid N+1 query problems.
+* Implement pagination for large data sets.
+
+## Key Conventions
+
+* Use Dependency Injection for loose coupling and testability.
+* Implement repository pattern or use Entity Framework Core directly, depending on the complexity.
+* Use AutoMapper for object-to-object mapping if needed.
+* Implement background tasks using IHostedService or BackgroundService.
+
+<!-- ## Testing
+
+* Write unit tests using xUnit, NUnit, or MSTest.
+* Use Moq or NSubstitute for mocking dependencies.
+* Implement integration tests for API endpoints. -->
+
+## Security
+
+* Use Authentication and Authorization middleware.
+* Implement JWT authentication for stateless API authentication.
+* Use HTTPS and enforce SSL.
+* Implement proper CORS policies.
+
+<!-- * Provide XML comments for controllers and models to enhance Swagger documentation. -->
+
+Follow the official Microsoft documentation and ASP.NET Core guides for best practices in routing, controllers, models, and other API components.

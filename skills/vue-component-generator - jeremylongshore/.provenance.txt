@@ -1,0 +1,5 @@
+source=https://github.com/jeremylongshore/claude-code-plugins-plus-skills.git
+path=skills/05-frontend-dev/vue-component-generator
+installed_at=2026-08-03T22:05:06Z
+commit=5063d1fa79a7e74c98c50b90f2ad3d4c7b994224
+method=git-sparse-checkout-no-marketplace

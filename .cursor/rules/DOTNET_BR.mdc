@@ -1,0 +1,340 @@
+# .NET Development Rules — Versão Melhorada
+
+> Documento organizado em blocos separados com exemplos concisos, decisões de projeto e padrões recomendados.
+
+## 1. Resumo das mudanças
+
+* Padronizei e alinhei as regras às recomendações oficiais da Microsoft.
+* Adicionei exemplos práticos (Controllers, Serviços, DTOs, Middleware, Repositório, AutoMapper, FluentValidation, Paginação, Cache, JWT).
+* Substituí a recomendação de constantes em UPPERCASE pela prática comum de **PascalCase** (explico por quê abaixo).
+* Separei responsabilidades em blocos distintos para facilitar leitura e manutenção.
+
+## 2. Estrutura de pastas sugerida
+
+```
+/src
+  /Project.Api                <-- Web API (Controllers, Filters)
+  /Project.Application        <-- Services, DTOs, Interfaces
+  /Project.Domain             <-- Entities, ValueObjects, Domain Services
+  /Project.Infrastructure     <-- EF Core, Migrations, Repositories
+  /Project.Common             <-- Cross-cutting (Logging, Errors, Caching)
+/tests
+  /Project.Api.Tests
+  /Project.BlingApi.Tests
+  /Project.Infrastructure.Tests
+```
+
+## 3. Convenções de nomeação (melhor prática)
+
+* **Classes, métodos e membros públicos:** `PascalCase`
+* **Campos privados:** `_camelCase` (prefixo `_` é comum em C#)
+* **Variáveis locais:** `camelCase`
+* **Interfaces:** `IName` (`IUserService`)
+* **Constantes:** `PascalCase` (ex: `MaxRetries`) — por compatibilidade com guidelines modernas.
+* **Enums:** `PascalCase` para nomes e valores.
+
+> Observação: UPPERCASE costuma ser usado em algumas organizações, mas **PascalCase** é o padrão recomendado pela Microsoft para .NET e melhora compatibilidade com ferramentas de análise estática.
+
+## 4. Estilo de código e padrões
+
+* Use recursos modernos do C# (records, `with`, pattern matching, `init` properties, `??=`, `is not null`).
+* Use `var` quando o tipo é óbvio no lado direito da atribuição.
+* Prefira expressões e métodos pequenos e com única responsabilidade.
+* Prefira LINQ para consultas in-memory; para EF Core prefira projeções (`Select`) evitando `Include` em excesso quando possível.
+
+**Exemplo (record + pattern matching):**
+
+```csharp
+public record UserDto(string Id, string Name, string Email);
+
+string GetGreeting(object obj) => obj switch
+{
+    UserDto u => $"Olá, {u.Name}",
+    null => "Usuário desconhecido",
+    _ => "Olá"
+};
+```
+
+## 5. DTOs e serialização (System.Text.Json)
+
+* Use `JsonPropertyName` quando a propriedade JSON deve ter nome diferente do C#.
+* Marque propriedades obrigatórias e documente validações.
+* Para CPF: normalize o valor removendo tudo que não é dígito (regex para limpeza). Faça isso no setter ou em um conversor customizado.
+
+**Exemplo DTO com validação e normalização de CPF:**
+
+```csharp
+using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
+
+public record UserCreateDto
+{
+    [JsonPropertyName("fullName")]
+    public string FullName { get; init; } = null!;
+
+    [JsonPropertyName("cpf")]
+    public string CPF
+    {
+        get => _cpf;
+        init => _cpf = NormalizeCpf(value);
+    }
+
+    private static string NormalizeCpf(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return string.Empty;
+        return Regex.Replace(value!, "[^0-9]", string.Empty);
+    }
+
+    private readonly string _cpf = string.Empty;
+}
+```
+
+> Recomendo usar `FluentValidation` para regras de validação complexas e mensagens claras para clientes.
+
+## 6. Controllers e design de API
+
+* Use controllers finos que delegam lógica para serviços (Thin Controllers).
+* Use `ApiController` attribute e `ModelState` validation automática.
+* Versionamento via rota (ex: `api/v1/[controller]`) e via cabeçalho quando necessário.
+* Sempre retornar respostas consistentes (`ActionResult<T>`), com códigos HTTP apropriados.
+
+**Exemplo de Controller minimalista com versionamento e dependência via DI:**
+
+```csharp
+[ApiController]
+[Route("api/v{version:apiVersion}/[controller]")]
+[ApiVersion("1.0")]
+public class UsersController : ControllerBase
+{
+    private readonly IUserService _userService;
+
+    public UsersController(IUserService userService) => _userService = userService;
+
+    [HttpPost]
+    public async Task<ActionResult<UserDto>> Create(UserCreateDto dto)
+    {
+        var user = await _userService.CreateAsync(dto);
+        return CreatedAtAction(nameof(GetById), new { id = user.Id, version = "1.0" }, user);
+    }
+
+    [HttpGet("{id}")]
+    public async Task<ActionResult<UserDto>> GetById(string id)
+    {
+        var user = await _userService.GetByIdAsync(id);
+        if (user is null) return NotFound();
+        return Ok(user);
+    }
+}
+```
+
+## 7. Error handling global e padrão de resposta
+
+* Implemente middleware global de tratamento de exceções e normalize o formato de resposta de erro.
+* Logue exceções com `ILogger<T>` e retorne códigos adequados (400, 401, 403, 404, 500).
+
+**Exemplo simplificado de middleware:**
+
+```csharp
+public class ExceptionHandlingMiddleware
+{
+    private readonly RequestDelegate _next;
+    private readonly ILogger<ExceptionHandlingMiddleware> _logger;
+
+    public ExceptionHandlingMiddleware(RequestDelegate next, ILogger<ExceptionHandlingMiddleware> logger)
+    {
+        _next = next;
+        _logger = logger;
+    }
+
+    public async Task InvokeAsync(HttpContext context)
+    {
+        try
+        {
+            await _next(context);
+        }
+        catch (ValidationException vex)
+        {
+            _logger.LogWarning(vex, "Validation error");
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            await context.Response.WriteAsJsonAsync(new { error = vex.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Unhandled exception");
+            context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+            await context.Response.WriteAsJsonAsync(new { error = "Ocorreu um erro interno" });
+        }
+    }
+}
+```
+
+## 8. Entity Framework Core — recomendações
+
+* Use `AsNoTracking()` para consultas somente leitura.
+* Prefira projeções (`Select`) para retornar DTOs e evitar carregar entidades inteiras.
+* Evite `Include` sem necessidade — prefira consultas separadas ou `Select` combinando joins para performar melhor.
+* Use migrations organizadas e scripts idempotentes para ambientes.
+* Configure índices e relacionamentos no `OnModelCreating`.
+
+**Exemplo de consulta eficiente:**
+
+```csharp
+var page = await _context.Users
+    .AsNoTracking()
+    .Where(u => u.IsActive)
+    .OrderBy(u => u.Name)
+    .Select(u => new UserDto(u.Id, u.Name, u.Email))
+    .Skip((pageNumber - 1) * pageSize)
+    .Take(pageSize)
+    .ToListAsync();
+```
+
+## 9. Repositório vs EF direto
+
+* Para projetos simples/CRUD, usar EF Core diretamente com `DbContext` é aceitável.
+* Para cenários complexos (múltiplas fontes, regras de negócio encapsuladas), implemente repositórios ou um pattern de UnitOfWork.
+* Evite abstrações desnecessárias que apenas encapsulam `DbContext` sem adicionar valor.
+
+## 10. Mapeamento de objetos (AutoMapper)
+
+* Use `IMapper` e profiles centralizados.
+* Preferir `ProjectTo<T>` quando estiver usando AutoMapper junto com EF Core para converter no banco.
+
+**Profile exemplo:**
+
+```csharp
+public class MappingProfile : Profile
+{
+    public MappingProfile()
+    {
+        CreateMap<User, UserDto>();
+        CreateMap<UserCreateDto, User>()
+            .ForMember(d => d.CreatedAt, opt => opt.MapFrom(_ => DateTime.UtcNow));
+    }
+}
+```
+
+## 11. Validação (FluentValidation)
+
+* Crie validadores separados por DTO.
+* Integre com `ApiController` para retorno automático de erros formatados.
+
+**Exemplo:**
+
+```csharp
+public class UserCreateDtoValidator : AbstractValidator<UserCreateDto>
+{
+    public UserCreateDtoValidator()
+    {
+        RuleFor(x => x.FullName).NotEmpty().WithMessage("Nome é obrigatório");
+        RuleFor(x => x.CPF).Matches("^[0-9]{11}$").WithMessage("CPF inválido");
+    }
+}
+```
+
+## 12. Logging e Telemetria
+
+* Use `ILogger<T>` por classe.
+* Configure Application Insights ou outra solução de APM para telemetria em produção.
+* Logue mensagens estruturadas (EventId, propriedades).
+
+## 13. Segurança
+
+* Use HTTPS sempre e aplique HSTS em produção.
+* JWT para autenticação stateless; valide claims, expiração e issuer/audience.
+* Use políticas de autorização (`[Authorize(Policy = "X")]`) quando preciso.
+* Proteja endpoints sensíveis e sanitize entradas.
+
+**Exemplo de configuração JWT (appsettings):**
+
+```json
+"Jwt": {
+  "Issuer": "YourIssuer",
+  "Audience": "YourAudience",
+  "Key": "CHAVE_SUPER_SECRETA_MUITO_LONGA"
+}
+```
+
+## 14. Performance e escalabilidade
+
+* Use async/await para operações I/O.
+* Implementar cache com `IMemoryCache` e Redis para cenários distribuídos.
+* Use `ResponseCaching` e `ETag` quando aplicável.
+* Monitorar e reduzir chamadas de banco desnecessárias (N+1).
+
+**Exemplo de cache simples:**
+
+```csharp
+public async Task<UserDto> GetCachedUser(string id)
+{
+    var cacheKey = $"user:{id}";
+    if (!_memoryCache.TryGetValue(cacheKey, out UserDto? cached))
+    {
+        cached = await _userRepository.GetByIdAsync(id);
+        _memoryCache.Set(cacheKey, cached, TimeSpan.FromMinutes(5));
+    }
+    return cached!;
+}
+```
+
+## 15. Paginação e filtros
+
+* Padronize request/response para paginação (pageNumber, pageSize, totalItems).
+* Use link headers ou objeto de metadados no corpo com informações de página.
+
+**Exemplo de modelo de resposta:**
+
+```json
+{
+  "items": [ /* ... */ ],
+  "page": 1,
+  "pageSize": 20,
+  "totalItems": 342
+}
+```
+
+## 16. Documentação e Swagger
+
+* Ative Swagger (Swashbuckle) e descreva endpoints, modelos e exemplos.
+* Use `Swashbuckle.AspNetCore.Annotations` para anotações nos controllers e DTOs.
+
+## 17. Testes (unit + integração)
+
+* Escreva testes unitários com xUnit + Moq/NSubstitute.
+* Escreva testes de integração que rodem com um `TestServer` ou containers (ex: Postgres/SQL Server via Docker).
+* Automatize testes no pipeline CI (GitHub Actions/GitLab CI/Azure Pipelines).
+
+## 18. CI/CD e boas práticas operacionais
+
+* Mantenha pipelines com etapas: build → test → security scan → deploy.
+* Use migrações automáticas com cautela; prefira aplicar migrations via pipeline controlado.
+
+## 19. Exemplos rápidos (boas práticas)
+
+**Async service:**
+
+```csharp
+public interface IUserService { Task<UserDto?> GetByIdAsync(string id); }
+
+public class UserService : IUserService
+{
+    private readonly ApplicationDbContext _ctx;
+
+    public UserService(ApplicationDbContext ctx) => _ctx = ctx;
+
+    public async Task<UserDto?> GetByIdAsync(string id)
+    {
+        return await _ctx.Users
+            .AsNoTracking()
+            .Where(u => u.Id == id)
+            .Select(u => new UserDto(u.Id, u.Name, u.Email))
+            .SingleOrDefaultAsync();
+    }
+}
+```
+
+## 20. Observações finais
+
+* Prefira clareza e simplicidade sobre micro-otimizações prematuras.
+* Documente decisões arquiteturais (Arquitetural Decision Records - ADRs).
+* Revisões de código e PR templates ajudam a manter a consistência.

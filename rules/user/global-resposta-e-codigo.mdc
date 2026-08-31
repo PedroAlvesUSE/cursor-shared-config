@@ -1,0 +1,11 @@
+---
+description: Preferências globais de idioma e estilo de resposta
+alwaysApply: true
+---
+
+# Preferências globais
+
+- Responder sempre em **pt-BR**
+- Escrever código (nomes, identificadores e conteúdo técnico no código) em **inglês**
+- Escrever documentação e comentários de código em **pt-BR**
+- Priorizar respostas curtas e diretas por padrão

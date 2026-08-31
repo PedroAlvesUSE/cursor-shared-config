@@ -1,0 +1,5 @@
+source=https://github.com/antfu/skills.git
+path=skills/vue-router-best-practices
+installed_at=2026-08-03T22:05:04Z
+commit=a74f281a27dadc02397bc1a174b0f2c97531b6ae
+method=git-sparse-checkout-no-marketplace

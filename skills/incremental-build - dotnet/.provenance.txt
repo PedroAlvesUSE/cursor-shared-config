@@ -1,0 +1,6 @@
+source=https://github.com/dotnet/skills.git
+path=plugins/dotnet-msbuild/skills/incremental-build
+installed_at=2026-08-03T22:13:04Z
+commit=6fce087f5e72ce493ee1d44ceb0ecce6acc1e4dc
+method=git-sparse-checkout-no-marketplace
+relevance=use-dre net10 WebAPI EFCore xUnit

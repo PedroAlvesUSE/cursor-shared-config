@@ -1,0 +1,5 @@
+source=https://github.com/ruvnet/ruflo.git
+path=.agents/skills/v3-ddd-architecture
+installed_at=2026-08-03T22:05:09Z
+commit=913f9eaedee92627950544424e50339feaf98271
+method=git-sparse-checkout-no-marketplace

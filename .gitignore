@@ -1,1 +1,8 @@
 userinput.py
+.env
+.env.*
+*.pem
+**/credentials*
+**/secrets*
+mcp/mcp.json
+.DS_Store

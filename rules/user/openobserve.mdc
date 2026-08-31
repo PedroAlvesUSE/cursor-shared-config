@@ -1,0 +1,463 @@
+---
+description: Integrar OpenObserve via OpenTelemetry (OTLP/HTTP) em APIs ASP.NET Core
+globs: "**/{Program.cs,*.csproj,appsettings*.json,.env.example,.github/workflows/*.yaml,Observability/**,Http/**}"
+alwaysApply: false
+---
+
+# OpenObserve — guia de implementação para IA
+
+Playbook para replicar a integração OpenObserve em qualquer serviço .NET da Use Uniforme.
+Referência de implementação: `integrations/PipedriveApi/Observability/OpenTelemetryExtensions.cs`.
+
+## Contexto
+
+| Item | Valor padrão |
+|------|--------------|
+| UI | `https://backend.useuniformesp.com.br/openobserve/web/` |
+| Endpoint OTLP base | `https://backend.useuniformesp.com.br/openobserve/api/default` |
+| Organização | `default` |
+| Protocolo | OTLP/HTTP (`HttpProtobuf`) |
+| Autenticação | `Authorization: Basic base64(email:password)` |
+| Stream (OTLP) | Header `stream-name` (padrão: nome do serviço, ex. `PipedriveApi`) |
+
+**Regra do endpoint:** sem barra no final. O SDK concatena `/v1/traces`, `/v1/metrics` ou `/v1/logs`.
+
+## Streams por serviço
+
+Cada serviço envia traces, logs e metrics para um stream dedicado via header OTLP `stream-name`. Sem esse header, tudo cai no stream `default`.
+
+| Comportamento | Detalhe |
+|---------------|---------|
+| **Auto-criação** | OpenObserve cria o stream automaticamente na primeira ingestão OTLP (não é necessário provisionar via REST) |
+| **Config** | `OpenObserve:StreamName` (env: `OpenObserve__StreamName`); padrão = `serviceName` do serviço |
+| **Header OTLP** | `stream-name={StreamName}` junto com `Authorization` em `OtlpExporterOptions.Headers` (formato `key=value,key2=value2`) |
+
+Exemplo no exporter:
+
+```csharp
+const string serviceName = "PipedriveApi";
+var streamName = section["StreamName"];
+if (string.IsNullOrWhiteSpace(streamName))
+    streamName = serviceName;
+
+var authHeader = $"Authorization=Basic {Convert.ToBase64String(...)}";
+var exporterHeaders = $"{authHeader},stream-name={streamName}";
+options.Headers = exporterHeaders;
+```
+
+## O que é exportado
+
+Por padrão (`IncludeSuccess=false`), **somente erros** vão ao OpenObserve. Com `IncludeSuccess=true`, sucessos também são exportados.
+
+| Sinal | `IncludeSuccess=false` (padrão) | `IncludeSuccess=true` |
+|-------|--------------------------------|------------------------|
+| **Traces** | Spans com status Error, exception ou HTTP >= 400 | Todos os spans (exceto `/swagger`) |
+| **Metrics** | Não exporta | ASP.NET Core + `HttpClient` |
+| **Logs** | Só `LogError` / `LogCritical` via OTLP | `LogInformation+` via OTLP |
+
+Critério de erro em traces: `ActivityStatusCode.Error`, evento `exception`, ou tag `http.response.status_code` / `http.status_code` >= 400. Implementação: `ErrorOnlyActivityProcessor`.
+
+**Limitação conhecida:** exceções capturadas em `catch` sem `LogError(ex, ...)` **não** aparecem em logs, só em traces se propagarem. **Clients HTTP/gRPC devem logar erros explicitamente** (ver seção abaixo).
+
+## Logging em clients (obrigatório)
+
+Erros de clients **não** vão para o OpenObserve só com `EnsureSuccessStatusCode()` ou `return false`. É necessário `ILogger.LogError` incluindo o **body da resposta**.
+
+Referência: `integrations/PipedriveApi/Http/HttpClientErrorLogger.cs`.
+
+### Regras
+
+1. Injetar `ILogger<{ClientName}>` em todo `*Client` (HTTP e gRPC).
+2. Em falha HTTP, **sempre** ler e logar o response body antes de propagar ou retornar.
+3. Usar `LogError` **somente em falha**, com `{Operation}`, `{StatusCode}` e `{ApiResponse}` (body da API externa).
+4. **Não** logar payload de request (`{@Context}`) nem dados de entrada; evita ruído e PII em sucesso.
+5. Em clients gRPC, capturar `RpcException` e logar com `LogError(ex, ...)` sem incluir o valor validado.
+6. Logar em **todos** os ambientes (não restringir a `Development`).
+7. Suprimir logs automáticos do `HttpClient` (`"End processing HTTP request..."`): `System.Net.Http.HttpClient` e `Microsoft.Extensions.Http` em **`None`**, inclusive no `OpenTelemetryLoggerProvider` (antes de `AddOpenTelemetry`).
+8. Se o body já foi lido para outra lógica, passá-lo ao logger para **não** ler o stream duas vezes.
+
+### Helper recomendado (`Http/HttpClientErrorLogger.cs`)
+
+Copiar/adaptar em cada serviço. Usa `[CallerMemberName]`, `[CallerFilePath]` e `[CallerLineNumber]` para incluir arquivo e função do caller no log e no span ativo (`code.function`, `code.filepath`, `code.lineno`):
+
+```csharp
+internal static class HttpClientErrorLogger
+{
+    public static async Task EnsureSuccessOrLogAsync(
+        HttpResponseMessage response,
+        ILogger logger,
+        string operation,
+        CancellationToken cancellationToken = default,
+        [CallerMemberName] string callerMember = "",
+        [CallerFilePath] string callerFile = "",
+        [CallerLineNumber] int callerLine = 0)
+    {
+        if (response.IsSuccessStatusCode) return;
+        await LogIfFailedAsync(response, logger, operation, cancellationToken,
+            responseBody: null, callerMember, callerFile, callerLine);
+        response.EnsureSuccessStatusCode();
+    }
+
+    public static async Task LogIfFailedAsync(
+        HttpResponseMessage response,
+        ILogger logger,
+        string operation,
+        CancellationToken cancellationToken = default,
+        string? responseBody = null,
+        [CallerMemberName] string callerMember = "",
+        [CallerFilePath] string callerFile = "",
+        [CallerLineNumber] int callerLine = 0)
+    {
+        if (response.IsSuccessStatusCode) return;
+
+        var caller = CallerInfoEnricher.Capture(callerMember, callerFile, callerLine);
+        CallerInfoEnricher.ApplyToCurrentActivity(caller);
+
+        var body = responseBody ?? await response.Content.ReadAsStringAsync(cancellationToken);
+        logger.LogError(
+            "Erro HTTP em {Operation} ({CallerMember} em {CallerFile}:{CallerLine}): {StatusCode} {ReasonPhrase}. ApiResponse: {ApiResponse}",
+            operation, caller.Member, caller.File, caller.Line,
+            (int)response.StatusCode, response.ReasonPhrase, body);
+    }
+}
+```
+
+Copiar também `Observability/CallerInfoEnricher.cs` e `Observability/GrpcErrorLogger.cs` (mesmo padrão de caller info para gRPC).
+
+### Uso nos clients
+
+Substituir `response.EnsureSuccessStatusCode()` por:
+
+```csharp
+await HttpClientErrorLogger.EnsureSuccessOrLogAsync(
+    response, _logger, nameof(CreateDealAsync), cancellationToken);
+```
+
+Quando o método retorna `bool` em falha (sem throw):
+
+```csharp
+await HttpClientErrorLogger.LogIfFailedAsync(
+    response, _logger, nameof(CreateEmailAsync), cancellationToken);
+return response.IsSuccessStatusCode;
+```
+
+Quando o body já foi lido:
+
+```csharp
+var body = await response.Content.ReadAsStringAsync(cancellationToken);
+await HttpClientErrorLogger.LogIfFailedAsync(
+    response, _logger, nameof(UpdatePersonAsync), cancellationToken, body);
+```
+
+gRPC (sem valor de entrada no log):
+
+```csharp
+catch (RpcException ex)
+{
+    GrpcErrorLogger.LogRpcException(_logger, ex, nameof(ValidateEmailAsync));
+    throw;
+}
+```
+
+Filtros de log (diagnóstico do HttpClient não vai ao OpenObserve):
+
+```json
+"System.Net.Http.HttpClient": "None",
+"Microsoft.Extensions.Http": "None"
+```
+
+No `OpenTelemetryExtensions`, aplicar **antes** de `AddOpenTelemetry`:
+
+```csharp
+builder.Logging.AddFilter("System.Net.Http.HttpClient", LogLevel.None);
+builder.Logging.AddFilter("Microsoft.Extensions.Http", LogLevel.None);
+builder.Logging.AddFilter<OpenTelemetryLoggerProvider>("System.Net.Http.HttpClient", LogLevel.None);
+builder.Logging.AddFilter<OpenTelemetryLoggerProvider>("Microsoft.Extensions.Http", LogLevel.None);
+```
+
+### Checklist por client
+
+- [ ] `ILogger<T>` no construtor
+- [ ] Toda falha HTTP logada com `{ApiResponse}` (sem payload de request)
+- [ ] Falhas gRPC logadas com `GrpcErrorLogger` (caller info + exception)
+- [ ] Métodos que retornam `null`/`false` em erro também logam (ex.: `GetById` com 404)
+- [ ] `HttpClient` factory em `None` (+ filtro no `OpenTelemetryLoggerProvider`)
+
+## Checklist de implementação
+
+Ao integrar um novo serviço, executar **todos** os passos abaixo.
+
+### 1. Pacotes NuGet
+
+```bash
+dotnet add package OpenTelemetry.Extensions.Hosting
+dotnet add package OpenTelemetry.Instrumentation.AspNetCore
+dotnet add package OpenTelemetry.Instrumentation.Http
+dotnet add package OpenTelemetry.Exporter.OpenTelemetryProtocol
+```
+
+Usar versões alinhadas (ex.: `1.18.0`). **Não** instalar só o pacote `OpenTelemetry` isolado.
+
+Opcional (beta): `OpenTelemetry.Instrumentation.EntityFrameworkCore` para spans de queries EF.
+
+### 2. Criar `Observability/OpenTelemetryExtensions.cs`
+
+- Namespace: `{ProjectName}.Observability`
+- Método de extensão: `AddOpenObserveTelemetry(this WebApplicationBuilder builder)`
+- **`serviceName`:** nome único por serviço (ex.: `PipedriveApi`, `CollectorApi`). Nunca reutilizar o mesmo nome entre serviços.
+- Ler configuração da seção `OpenObserve`
+- Se `Enabled=false`, retornar sem registrar nada
+- Se `Enabled=true` sem credenciais, lançar `InvalidOperationException` (fail fast)
+
+Template obrigatório (substituir `{ServiceName}` e `{ProjectName}`):
+
+```csharp
+using System.Text;
+using OpenTelemetry.Exporter;
+using OpenTelemetry.Logs;
+using OpenTelemetry.Metrics;
+using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
+
+namespace {ProjectName}.Observability;
+
+public static class OpenTelemetryExtensions
+{
+    public static WebApplicationBuilder AddOpenObserveTelemetry(this WebApplicationBuilder builder)
+    {
+        var section = builder.Configuration.GetSection("OpenObserve");
+        if (!section.GetValue("Enabled", false))
+            return builder;
+
+        var endpoint = section["Endpoint"]?.TrimEnd('/');
+        if (string.IsNullOrWhiteSpace(endpoint))
+            return builder;
+
+        var username = section["Username"];
+        var password = section["Password"];
+        if (string.IsNullOrWhiteSpace(username) || string.IsNullOrWhiteSpace(password))
+            throw new InvalidOperationException(
+                "OpenObserve está habilitado, mas Username ou Password não foram configurados.");
+
+        var includeSuccess = section.GetValue("IncludeSuccess", false);
+
+        const string serviceName = "{ServiceName}";
+        var streamName = section["StreamName"];
+        if (string.IsNullOrWhiteSpace(streamName))
+            streamName = serviceName;
+
+        var authHeader =
+            $"Authorization=Basic {Convert.ToBase64String(Encoding.UTF8.GetBytes($"{username}:{password}"))}";
+        var exporterHeaders = $"{authHeader},stream-name={streamName}";
+
+        void ConfigureExporter(OtlpExporterOptions options, string signalPath)
+        {
+            options.Endpoint = new Uri($"{endpoint}{signalPath}");
+            options.Protocol = OtlpExportProtocol.HttpProtobuf;
+            options.Headers = exporterHeaders;
+        }
+
+        var openTelemetry = builder.Services.AddOpenTelemetry()
+            .ConfigureResource(resource => resource.AddService(
+                serviceName: serviceName,
+                serviceVersion: typeof(OpenTelemetryExtensions).Assembly.GetName().Version?.ToString() ?? "1.0.0"))
+            .WithTracing(tracing => tracing
+                .AddAspNetCoreInstrumentation(o =>
+                {
+                    o.Filter = ctx => !ctx.Request.Path.StartsWithSegments("/swagger");
+                    o.RecordException = true;
+                })
+                .AddHttpClientInstrumentation(o => o.RecordException = true)
+                .AddProcessor(new ErrorOnlyActivityProcessor(includeSuccess))
+                .AddOtlpExporter(o => ConfigureExporter(o, "/v1/traces")));
+
+        if (includeSuccess)
+        {
+            openTelemetry.WithMetrics(metrics => metrics
+                .AddAspNetCoreInstrumentation()
+                .AddHttpClientInstrumentation()
+                .AddOtlpExporter(o => ConfigureExporter(o, "/v1/metrics")));
+        }
+
+        builder.Logging.AddFilter("System.Net.Http.HttpClient", LogLevel.None);
+        builder.Logging.AddFilter("Microsoft.Extensions.Http", LogLevel.None);
+        builder.Logging.AddFilter<OpenTelemetryLoggerProvider>("System.Net.Http.HttpClient", LogLevel.None);
+        builder.Logging.AddFilter<OpenTelemetryLoggerProvider>("Microsoft.Extensions.Http", LogLevel.None);
+
+        var otelLogLevel = includeSuccess ? LogLevel.Information : LogLevel.Error;
+        builder.Logging.AddFilter<OpenTelemetryLoggerProvider>(null, otelLogLevel);
+
+        builder.Logging.AddOpenTelemetry(logging =>
+        {
+            logging.IncludeScopes = false;
+            logging.AddOtlpExporter(o => ConfigureExporter(o, "/v1/logs"));
+        });
+
+        return builder;
+    }
+}
+```
+
+**Pitfall crítico:** com `AddOtlpExporter` + callback manual, é **obrigatório** passar o path completo (`/v1/traces`, etc.). Não usar `UseOtlpExporter()` no mesmo pipeline se já houver `AddOtlpExporter` por sinal.
+
+**Usings obrigatórios para logs:** `OpenTelemetry.Logs` (senão `AddOtlpExporter` em logging não resolve).
+
+Copiar também `Observability/ErrorOnlyActivityProcessor.cs` (filtra spans de sucesso quando `IncludeSuccess=false` e enriquece `DisplayName` de erros com `{function} ({file}:{line})` quando tags `code.*` existem).
+
+Copiar também `Observability/CallerInfoEnricher.cs` e `Observability/GrpcErrorLogger.cs`.
+
+Copiar também `EssentialFields.cs`, `EssentialOnlyActivityProcessor.cs` e `EssentialOnlyLogProcessor.cs` para exportar **somente campos essenciais** (filtra tags de trace e atributos de log antes do export OTLP).
+
+Ajustar filtro de trace se o serviço expõe health check em path diferente de `/swagger`.
+
+### 3. Alterar `Program.cs`
+
+Após carregar configuração (`AddDotNetEnv`, `AddEnvironmentVariables`, etc.) e **antes** de `Build()`:
+
+```csharp
+using {ProjectName}.Observability;
+
+// ...
+
+builder.AddOpenObserveTelemetry();
+```
+
+### 4. `appsettings.json`
+
+Adicionar seção (credenciais vazias; `Enabled: false` por padrão):
+
+```json
+"OpenObserve": {
+  "Enabled": false,
+  "IncludeSuccess": false,
+  "Endpoint": "https://backend.useuniformesp.com.br/openobserve/api/default",
+  "Username": "",
+  "Password": "",
+  "StreamName": "{ServiceName}"
+}
+```
+
+### 5. `.env.example`
+
+```env
+# OpenObserve (OTLP/HTTP) — DotNetEnv: __ vira : em Configuration
+OpenObserve__Enabled=true
+OpenObserve__IncludeSuccess=false
+OpenObserve__Endpoint=https://backend.useuniformesp.com.br/openobserve/api/default
+OpenObserve__Username=
+OpenObserve__Password=
+OpenObserve__StreamName={ServiceName}
+```
+
+Nunca commitar `.env` com senha. `.env` deve estar no `.gitignore`.
+
+### 6. Deploy (GitHub Actions / SSH)
+
+Seguir o padrão das demais envs no script que gera `.env`:
+
+```bash
+# OpenObserve configuration
+echo "OpenObserve__Enabled=${{ secrets.OPENOBSERVE_ENABLED }}" >> .env
+echo "OpenObserve__IncludeSuccess=${{ secrets.OPENOBSERVE_INCLUDE_SUCCESS || 'false' }}" >> .env
+echo "OpenObserve__Endpoint=${{ secrets.OPENOBSERVE_ENDPOINT }}" >> .env
+echo "OpenObserve__Username=${{ secrets.OPENOBSERVE_USERNAME }}" >> .env
+echo "OpenObserve__Password=${{ secrets.OPENOBSERVE_PASSWORD }}" >> .env
+echo "OpenObserve__StreamName=${{ secrets.OPENOBSERVE_STREAM_NAME || '{ServiceName}' }}" >> .env
+```
+
+Secrets a criar no repositório GitHub:
+
+| Secret | Exemplo |
+|--------|---------|
+| `OPENOBSERVE_ENABLED` | `true` |
+| `OPENOBSERVE_INCLUDE_SUCCESS` | `false` (opcional; padrão `false`) |
+| `OPENOBSERVE_ENDPOINT` | `https://backend.useuniformesp.com.br/openobserve/api/default` |
+| `OPENOBSERVE_USERNAME` | `data@useuniformesp.com.br` |
+| `OPENOBSERVE_PASSWORD` | *(senha do OpenObserve)* |
+| `OPENOBSERVE_STREAM_NAME` | `{ServiceName}` (opcional; padrão = nome do serviço) |
+
+Mesmos secrets podem ser reutilizados entre serviços se apontarem para a mesma instância.
+
+### 7. Validar
+
+1. `dotnet build` sem erros
+2. Subir API com `OpenObserve__Enabled=true` e credenciais preenchidas
+3. Fazer requisições nos endpoints
+4. No OpenObserve, verificar streams do serviço:
+   - **Traces / Logs / Metrics** → stream `{ServiceName}` (ou valor de `OpenObserve:StreamName`)
+   - Filtrar traces por `service.name = {ServiceName}`
+
+Teste rápido de conectividade (substituir credenciais):
+
+```bash
+curl -s -o /dev/null -w "%{http_code}" -X POST \
+  "https://backend.useuniformesp.com.br/openobserve/api/default/v1/traces" \
+  -H "Authorization: Basic $(echo -n 'email:senha' | base64 -w0)" \
+  -H "Content-Type: application/x-protobuf" \
+  --data-binary @/dev/null
+```
+
+Esperado: `200`.
+
+## Variáveis de ambiente alternativas (OTEL_*)
+
+O SDK também aceita variáveis padrão OpenTelemetry (`OTEL_EXPORTER_OTLP_*`). **Preferir** a seção `OpenObserve` + extensão acima para manter consistência entre serviços Use Uniforme. Não misturar as duas abordagens no mesmo serviço.
+
+## Anti-patterns
+
+| Errado | Correto |
+|--------|---------|
+| Endpoint com `/` no final | `TrimEnd('/')` + path do sinal |
+| Senha no `appsettings.json` commitado | Secrets / `.env` local |
+| `UseOtlpExporter()` + `AddOtlpExporter()` no mesmo serviço | Escolher um; usar `AddOtlpExporter` com paths explícitos |
+| Mesmo `serviceName` em todos os serviços | Nome único por API |
+| Esperar log de exception em `catch` sem `LogError` | Usar `LogError(ex, ...)` ou middleware global |
+| `EnsureSuccessStatusCode()` sem logar body | Usar `HttpClientErrorLogger` com `{ApiResponse}` |
+| Logar `{@Context}` / payload de request | Logar só `{ApiResponse}` da resposta em falha |
+| Log de erro de client só em `Development` | Logar em todos os ambientes para o OpenObserve |
+| Logs Information do `HttpClient` ("End processing HTTP request...") | Filtrar categorias como `None` + `OpenTelemetryLoggerProvider` |
+| Exportar traces/metrics/logs de sucesso por padrão | `IncludeSuccess=false`; habilitar só para debug temporário |
+| Ler response body duas vezes | Passar `responseBody` já lido para `LogIfFailedAsync` |
+| `IncludeScopes = true` nos logs OTLP | `IncludeScopes = false` (menos ruído) |
+| Esperar remover `flags`, `links`, `reference_parent_span_id` no OpenObserve | Campos internos do storage/UI; não controláveis pelo exporter .NET |
+
+## Caller info nos registros de erro
+
+Logs e traces de erro incluem **arquivo e função do caller** (não só do client HTTP/gRPC):
+
+| Componente | Função |
+|------------|--------|
+| `CallerInfoEnricher` | Captura `[CallerMemberName]`, `[CallerFilePath]`, `[CallerLineNumber]`; aplica tags OTel `code.function`, `code.filepath`, `code.lineno` no `Activity.Current` |
+| `HttpClientErrorLogger` | Log HTTP com `{CallerMember}`, `{CallerFile}`, `{CallerLine}` |
+| `GrpcErrorLogger` | Log gRPC com mesmo padrão |
+| `ErrorOnlyActivityProcessor` | Renomeia `DisplayName` do span de erro para `CreatePhoneAsync (SsotClient.cs:59)` |
+
+Exemplo de log exportado:
+
+```text
+Erro HTTP em CreatePhoneAsync (SendPersonContactsToSsotAsync em PersonWebhookService.cs:142): 400 Bad Request. ApiResponse: {...}
+```
+
+**Limitação:** campos como `flags`, `links`, `reference_parent_span_id`, `_o2_ingest_ts` são do modelo de traces do OpenObserve e **não podem ser removidos** pelo código da aplicação.
+
+## Campos essenciais (filtro ativo)
+
+Por padrão, `EssentialOnlyActivityProcessor` e `EssentialOnlyLogProcessor` limitam o export a:
+
+| Sinal | Campos permitidos |
+|-------|-------------------|
+| **Resource** | `service.name` |
+| **Trace tags** | `http.request.method`, `http.route`, `http.response.status_code`, `code.function`, `code.filepath`, `code.lineno`, `exception.type`, `exception.message` |
+| **Log attributes** | `Operation`, `CallerMember`, `CallerFile`, `CallerLine`, `StatusCode`, `ApiResponse`, `exception.type`, `exception.message` |
+
+Structural fields (`trace_id`, `span_id`, `timestamp`, `body`, `severity`, `CategoryName` via scope) são mantidos automaticamente. `RecordException=false` + `EnrichWithException` evita `exception.stacktrace` nos traces.
+
+## Replicação em novo repositório
+
+1. Copiar/adaptar `Observability/OpenTelemetryExtensions.cs`, `ErrorOnlyActivityProcessor.cs`, `CallerInfoEnricher.cs` e `GrpcErrorLogger.cs` (usar PipedriveApi como referência)
+2. Copiar/adaptar `Http/HttpClientErrorLogger.cs` e aplicar logging em todos os `*Client`
+3. Adicionar pacotes NuGet
+4. Chamar `builder.AddOpenObserveTelemetry()` no `Program.cs`
+5. Atualizar `appsettings.json`, `.env.example` e workflow de deploy
+6. Criar secrets no GitHub (se ainda não existirem)
+7. Build + smoke test no OpenObserve
