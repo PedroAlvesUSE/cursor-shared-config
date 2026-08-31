@@ -1,8 +1,8 @@
-# cursor-team-config — configs Cursor para o time
+# cursor-shared-config — configs Cursor para o time
 
 Repositório com **MCPs**, **rules**, **skills**, **hooks** e **user rules** para padronizar o Cursor no time.
 
-Repo no GitHub: https://github.com/PedroAlvesUSE/cursor-team-config
+Repo no GitHub: https://github.com/PedroAlvesUSE/cursor-shared-config
 
 ## Conteúdo
 
@@ -21,8 +21,8 @@ Repo no GitHub: https://github.com/PedroAlvesUSE/cursor-team-config
 ## Instalação rápida
 
 ```bash
-git clone https://github.com/PedroAlvesUSE/cursor-team-config.git
-cd cursor-team-config
+git clone https://github.com/PedroAlvesUSE/cursor-shared-config.git
+cd cursor-shared-config
 ./scripts/install.sh
 ```
 
